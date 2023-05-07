@@ -1,40 +1,31 @@
 #include <iostream>
 #include <sched.h>
-#include <string.h>
-#include <sys/types.h>
+#include <cstring>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <fcntl.h>
-#include <fstream>
 
-/// Source: https://cesarvr.io/post/2018-05-22-create-containers/
+#define CGROUP_DIR "/sys/fs/cgroup/pids/container/"
+#define concat(a,b) (a"" b)
 
-int TRY(int status, const char *msg) {
-    if(status == -1) {
-        perror(msg);
-        exit(EXIT_FAILURE);
-    }
-    return status;
+/// Sources:
+/// https://cesarvr.io/post/2018-05-22-create-containers/
+
+
+void cgroup_write(const char* path, const char* value) {
+    int fp = open(path, O_WRONLY | O_APPEND );
+    write(fp, value, strlen(value));
+    close(fp);
 }
 
-//void write_rule(const char* path, const char* value) {
-//    int fp = open(path, O_WRONLY | O_APPEND );
-//    write(fp, value, strlen(value));
-//    close(fp);
-//}
-
-#define CGROUP_FOLDER "/sys/fs/cgroup/pids/container/"
-#define concat(a,b) (a"" b)
 void cgroup_init() {
-//    mkdir( CGROUP_FOLDER, S_IRUSR | S_IWUSR);  // Read & Write
-//    const char* pid  = std::to_string(getpid()).c_str();
-//
-//    write_rule(concat(CGROUP_FOLDER, "pids.max"), "5");
-//    write_rule(concat(CGROUP_FOLDER, "notify_on_release"), "1");
-//    write_rule(concat(CGROUP_FOLDER, "cgroup.procs"), pid);
+    mkdir(CGROUP_DIR, S_IRUSR | S_IWUSR);  // Read & Write
+    auto pid_str = std::to_string(getpid());
+    cgroup_write(concat(CGROUP_DIR, "pids.max"), "15");
+    cgroup_write(concat(CGROUP_DIR, "notify_on_release"), "1");
+    cgroup_write(concat(CGROUP_DIR, "cgroup.procs"), pid_str.c_str());
 }
 
 char* get_stack_memory() {
@@ -66,29 +57,59 @@ int run_shell(void*) {
     return 0;
 }
 
-void setup_root_dir(const char* folder){
-    chroot(folder);
-    chdir("/");
+void setup_root_dir(std::string& folder){
+    int ret = chroot(folder.c_str());
+    if (ret != 0) {
+        throw std::runtime_error("chroot failed: " + std::string(strerror(errno)));
+    }
+    ret = chdir("/");
+    if (ret != 0) {
+        throw std::runtime_error("chdir failed: " + std::string(strerror(errno)));
+    }
 }
 
 void clone_process(int (*fn)(void*), int flags){
-    auto pid = TRY(clone(fn, get_stack_memory(), flags, 0), "clone" );
+    auto pid = clone(fn, get_stack_memory(), flags, 0);
+    if (pid < 0) {
+        throw std::runtime_error("clone failed: " + std::string(strerror(errno)));
+    }
     wait(nullptr);
 }
 
-void mount_proc() {
-    mount("proc", "/proc", "proc", 0, 0);
+#define NETNS_PATH "/var/run/netns/container_network_ns"
+
+void join_network_namespace() {
+    int ns_fd = open(NETNS_PATH, O_RDONLY);
+    if (ns_fd == -1) {
+        throw std::runtime_error("open network namespace failed: " + std::string(strerror(errno)));
+    }
+    if (setns(ns_fd, CLONE_NEWNET) == -1) {
+        close(ns_fd);
+        throw std::runtime_error("setns failed: " + std::string(strerror(errno)));
+    }
+    close(ns_fd);
 }
 
-void container_init() {
+void mount_system_fs() {
+    if (mount("none", "/proc", "proc", 0, nullptr) != 0) {
+        throw std::runtime_error("mount /proc failed: " + std::string(strerror(errno)));
+    }
+    if (mount("none", "/sys", "sysfs", 0, nullptr) != 0) {
+        throw std::runtime_error("mount /sys failed: " + std::string(strerror(errno)));
+    }
+}
+
+void container_init(std::string root_dir="./container/container_root") {
     cgroup_init();
     setup_env_vars();
-    setup_root_dir("./container/container_root");
-    mount_proc();
+    join_network_namespace();
+    setup_root_dir(root_dir);
+    mount_system_fs();
 }
 
 void container_deinit() {
     umount("/proc");
+    umount("/sys");
 }
 
 void container_run_shell() {
@@ -103,6 +124,7 @@ int start_container(void *args) {
 }
 
 int main() {
-    clone_process(start_container, CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD | CLONE_NEWNET | CLONE_NEWNS);
+    int container_clone_flags = CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD | CLONE_NEWNS;
+    clone_process(start_container, container_clone_flags);
     return EXIT_SUCCESS;
 }
