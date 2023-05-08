@@ -29,7 +29,7 @@ function cleanup() {
     rm -f rootfs.tar.gz
     umount ./container_root/proc || true
     umount ./container_root/sys || true
-    umount ./container_root
+    umount ./container_root || true
     losetup -d $cont_dev || true # remove existing loopback if any
     rm -rf ./container_root || true
     info "clean up done"
@@ -66,28 +66,28 @@ function setup_rootfs() {
 
 function add_network_namespace() {
   NS_NAME="container_network_ns"
-  VETH_CONTAINER_NAME="veth_container"
-  VETH_HOST_NAME="veth_host"
+  CONTAINER_VETH="veth_container"
+  HOST_VETH="veth_host"
   HOST_IP="192.168.10.1"
   CONTAINER_IP="192.168.10.2"
   # Delete the veth pair interfaces
-  ip link delete "$VETH_CONTAINER_NAME" || true
-  ip link delete "$VETH_HOST_NAME" || true
+  ip link delete "$CONTAINER_VETH" || true
+  ip link delete "$HOST_VETH" || true
   # Delete the network namespace
   ip netns delete "$NS_NAME" || true
   info "adding network namespace..."
   # Create a network namespace
   ip netns add $NS_NAME
   # Create a virtual network interface pair
-  ip link add $VETH_HOST_NAME type veth peer name $VETH_CONTAINER_NAME
+  ip link add $HOST_VETH type veth peer name $CONTAINER_VETH
   # Move the container-side interface to the container namespace
-  ip link set $VETH_CONTAINER_NAME netns $NS_NAME
+  ip link set $CONTAINER_VETH netns $NS_NAME
   # Configure IP addresses for the interfaces
-  ip addr add $HOST_IP/24 dev $VETH_HOST_NAME
-  ip netns exec $NS_NAME ip addr add $CONTAINER_IP/24 dev $VETH_CONTAINER_NAME
+  ip addr add $HOST_IP/24 dev $HOST_VETH
+  ip netns exec $NS_NAME ip addr add $CONTAINER_IP/24 dev $CONTAINER_VETH
   # Enable network interfaces
-  ip link set $VETH_HOST_NAME up
-  ip netns exec $NS_NAME ip link set $VETH_CONTAINER_NAME up
+  ip link set $HOST_VETH up
+  ip netns exec $NS_NAME ip link set $CONTAINER_VETH up
   # Enable IP forwarding
   echo 1 > /proc/sys/net/ipv4/ip_forward
   # Set up network routing

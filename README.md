@@ -1,4 +1,5 @@
 # Lab 4 - create simple container
+![container showcase](examples/example.png)
 ## Build
 ```
 sudo ./init_container.sh # prepare environment for container
