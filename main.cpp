@@ -41,7 +41,9 @@ char* get_stack_memory() {
 }
 
 void set_hostname(std::string hostname) {
-    sethostname(hostname.c_str(), hostname.size());
+    if (sethostname(hostname.c_str(), hostname.size()) == -1) {
+        throw std::runtime_error("sethostname failed: " + std::string(strerror(errno)));
+    }
 }
 
 void setup_env_vars() {
@@ -53,7 +55,9 @@ void setup_env_vars() {
 
 int run_shell(void*) {
     char *args[] = {(char *)"/bin/bash", (char *)NULL};
-    execvp(args[0], args);
+    if (execvp(args[0], args) == -1) {
+        throw std::runtime_error("execvp failed: " + std::string(strerror(errno)));
+    }
     return 0;
 }
 
@@ -125,6 +129,7 @@ int start_container(void *args) {
 
 int main() {
     int container_clone_flags = CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD | CLONE_NEWNS;
+    std::cout << "starting container" << std::endl;
     clone_process(start_container, container_clone_flags);
     return EXIT_SUCCESS;
 }

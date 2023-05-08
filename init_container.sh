@@ -55,20 +55,13 @@ function mount_img() {
 }
 
 function setup_rootfs() {
-  info "downloading and setting up rootfs..."
-  if [[ ! -e rootfs.tar.gz ]] ; then
-    wget http://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/ubuntu-base-20.04.1-base-amd64.tar.gz -O rootfs.tar.gz
-  fi
-  tar -xzf ./rootfs.tar.gz -C ./container_root
+  info "setting up rootfs..."
+#  if [[ ! -e rootfs.tar.gz ]] ; then
+#   wget http://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/ubuntu-base-20.04.1-base-amd64.tar.gz -O rootfs.tar.gz
+#  fi
+#  tar -xzf ./rootfs.tar.gz -C ./container_root
+  tar -xzf ../deps/rootfs.tar.gz -C ./container_root
   info "rootfs setup done"
-}
-
-function add_deps() {
-  info "adding dependencies..."
-  # add sysbench to container
-  cp "$projdir/deps/sysbench" ./container_root/bin/sysbench -v
-  cp "$projdir/deps/libaio.so" ./container_root/lib/x86_64-linux-gnu/libaio.so.1 -v
-  info "add deps done"
 }
 
 function add_network_namespace() {
@@ -81,19 +74,19 @@ function add_network_namespace() {
   ip link delete "$VETH_CONTAINER_NAME" || true
   ip link delete "$VETH_HOST_NAME" || true
   # Delete the network namespace
-  ip netns delete "$NS_NAME"
+  ip netns delete "$NS_NAME" || true
   info "adding network namespace..."
   # Create a network namespace
-  ip netns add container_ns
+  ip netns add $NS_NAME
   # Create a virtual network interface pair
   ip link add $VETH_HOST_NAME type veth peer name $VETH_CONTAINER_NAME
   # Move the container-side interface to the container namespace
   ip link set $VETH_CONTAINER_NAME netns $NS_NAME
   # Configure IP addresses for the interfaces
-  ip addr add $HOST_IP/24 dev veth_host
-  ip netns exec $NS_NAME ip addr add $CONTAINER_IP/24 dev VETH_CONTAINER_NAME
+  ip addr add $HOST_IP/24 dev $VETH_HOST_NAME
+  ip netns exec $NS_NAME ip addr add $CONTAINER_IP/24 dev $VETH_CONTAINER_NAME
   # Enable network interfaces
-  ip link set veth_host up
+  ip link set $VETH_HOST_NAME up
   ip netns exec $NS_NAME ip link set $VETH_CONTAINER_NAME up
   # Enable IP forwarding
   echo 1 > /proc/sys/net/ipv4/ip_forward
